@@ -1,0 +1,175 @@
+# .github/workflows/build.yml  
+# 使用 Win32 Release_Debugout 配置编译 VirtuaNES 主程序和 DebugWindow  
+# Release_Debugout 定义了 _DEBUGOUT 宏，使 DEBUGOUT 宏生效，  
+# 同时保持 Release 级别的优化（不带调试符号的运行时库）  
+  
+name: Build VirtuaNES (Release_Debugout + DebugWindow)  
+  
+on:  
+  push:  
+    branches: [master]  
+  pull_request:  
+    branches: [master]  
+  workflow_dispatch:  
+  
+permissions:  
+  contents: write  
+  
+jobs:  
+  build:  
+    runs-on: windows-2022  
+  
+    steps:  
+      - name: 检出代码  
+        uses: actions/checkout@v4  
+  
+      # 用 vswhere 定位 vcvarsall.bat，避免硬编码 VS 路径  
+      - name: 查找 Visual Studio 安装路径  
+        id: find_vs  
+        shell: pwsh  
+        run: |  
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"  
+          $vsPath = & $vswhere -latest -products * `  
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `  
+            -property installationPath  
+          $vcvarsall = "$vsPath\VC\Auxiliary\Build\vcvarsall.bat"  
+          Write-Output "Found: $vcvarsall"  
+          "VCVARSALL=$vcvarsall" | Out-File -FilePath $env:GITHUB_OUTPUT -Append  
+  
+      # -----------------------------------------------------------------------  
+      # 编译 VirtuaNES 主程序 — Release_Debugout 配置  
+      # 对应 .dsp 中的 "VirtuaNES - Win32 Release_Debugout"  
+      # 关键宏：_DEBUGOUT（让 DEBUGOUT 宏展开为 Dbg.Out，向 DebugWindow 发送消息）  
+      # -----------------------------------------------------------------------  
+      - name: 编译 VirtuaNES (Release_Debugout)  
+        shell: cmd  
+        run: |  
+          call "${{ steps.find_vs.outputs.VCVARSALL }}" x86  
+          if errorlevel 1 exit /b 1  
+  
+          mkdir obj_debugout 2>nul  
+  
+          REM --- 编译器参数（对应 .dsp Release_Debugout 配置）---  
+          REM /MT   : 静态链接 CRT（与原始 /MT 一致）  
+          REM /EHsc : 替代已废弃的 /GX（启用 C++ 异常）  
+          REM /Z7   : 调试信息内嵌到 .obj（原始配置）  
+          REM /O2   : 优化速度  
+          REM _DEBUGOUT : 使 DEBUGOUT 宏生效  
+          set CFLAGS=/nologo /MT /W3 /EHsc /Z7 /O2 ^  
+            /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_DEBUGOUT"  
+          set INCLUDES=/I "." /I "NES" /I "NES\Mapper" /I "NES\ApuEx" ^  
+            /I "NES\ApuEx\emu2413" /I "NES\PadEx" /I "Zlib"  
+          set OUTDIR=/Fo"obj_debugout\\"  
+  
+          REM --- 根目录 .cpp 源文件 ---  
+          cl %CFLAGS% %INCLUDES% %OUTDIR% /c ^  
+            AboutDlg.cpp App.cpp Archive.cpp AviConvDlg.cpp AviWriter.cpp ^  
+            ChatDlg.cpp CheatDlg.cpp Com.cpp Config.cpp ControllerDlg.cpp ^  
+            Crclib.cpp DatachBarcodeDlg.cpp DebugOut.cpp DipSwitchDlg.cpp ^  
+            DirectDraw.cpp DirectInput.cpp DirectSound.cpp EmulatorDlg.cpp ^  
+            EmuThread.cpp FolderDlg.cpp GameOptionDlg.cpp GraphicsDlg.cpp ^  
+            JoyAxisDlg.cpp LanguageDlg.cpp LauncherDlg.cpp MainFrame.cpp ^  
+            MemoryView.cpp MMTimer.cpp MovieDlg.cpp MovieInfoDlg.cpp ^  
+            NameTableView.cpp NetPlay.cpp NetPlayDlg.cpp PaletteEdit.cpp ^  
+            PaletteView.cpp Pathlib.cpp PatternView.cpp Plugin.cpp ^  
+            Recent.cpp Registry.cpp RomInfoDlg.cpp ShortcutDlg.cpp ^  
+            SoundDlg.cpp WaveRec.cpp WinMain.cpp Wnd.cpp WndHook.cpp  
+          if errorlevel 1 exit /b 1  
+  
+          REM SimpleVirusChecker.c 是 C 文件，单独编译  
+          cl %CFLAGS% %INCLUDES% %OUTDIR% /c SimpleVirusChecker.c  
+          if errorlevel 1 exit /b 1  
+  
+          REM --- NES 核心 ---  
+          cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\*.cpp  
+          if errorlevel 1 exit /b 1  
+  
+          REM --- NES\Mapper ---  
+          cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\Mapper\*.cpp  
+          if errorlevel 1 exit /b 1  
+  
+          REM --- NES\ApuEx ---  
+          if exist NES\ApuEx\*.cpp (  
+            cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\ApuEx\*.cpp  
+            if errorlevel 1 exit /b 1  
+          )  
+          if exist NES\ApuEx\*.c (  
+            cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\ApuEx\*.c  
+            if errorlevel 1 exit /b 1  
+          )  
+  
+          REM --- NES\ApuEx\emu2413 ---  
+          if exist NES\ApuEx\emu2413\*.c (  
+            cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\ApuEx\emu2413\*.c  
+            if errorlevel 1 exit /b 1  
+          )  
+  
+          REM --- NES\PadEx ---  
+          if exist NES\PadEx\*.cpp (  
+            cl %CFLAGS% %INCLUDES% %OUTDIR% /c NES\PadEx\*.cpp  
+            if errorlevel 1 exit /b 1  
+          )  
+  
+          REM --- Zlib（不需要 _DEBUGOUT，单独设置编译参数）---  
+          cl /nologo /MT /W3 /O2 /D "WIN32" /D "NDEBUG" %OUTDIR% /c Zlib\*.c  
+          if errorlevel 1 exit /b 1  
+  
+          REM --- 编译资源文件 ---  
+          rc /nologo /l 0x411 /d "NDEBUG" /fo "obj_debugout\VirtuaNES.res" VirtuaNES.rc  
+          if errorlevel 1 exit /b 1  
+  
+          REM --- 生成链接器响应文件（避免命令行过长，link.exe 不展开通配符）---  
+          (for %%f in (obj_debugout\*.obj) do echo %%f) > link_objs.rsp  
+          echo obj_debugout\VirtuaNES.res >> link_objs.rsp  
+  
+          REM --- 链接 ---  
+          REM 注意：原始 .dsp 使用 dinput.lib（DirectInput 7）  
+          REM 若链接报错找不到 dinput.lib，可改为 dinput8.lib  
+          link /nologo /subsystem:windows /map /debug /machine:I386 ^  
+            /out:"VirtuaNES.exe" ^  
+            @link_objs.rsp ^  
+            kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib ^  
+            advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib ^  
+            odbc32.lib odbccp32.lib winmm.lib comctl32.lib imm32.lib ^  
+            dinput.lib shlwapi.lib  
+          if errorlevel 1 exit /b 1  
+  
+      # -----------------------------------------------------------------------  
+      # 编译 DebugWindow — Release 配置  
+      # DebugWindow 本身不需要 _DEBUGOUT，用 Release 配置即可  
+      # -----------------------------------------------------------------------  
+      - name: 编译 DebugWindow (Release)  
+        shell: cmd  
+        run: |  
+          call "${{ steps.find_vs.outputs.VCVARSALL }}" x86  
+          if errorlevel 1 exit /b 1  
+  
+          mkdir DebugWindowSrc\obj 2>nul  
+  
+          cl /nologo /W3 /EHsc /O2 ^  
+            /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" ^  
+            /Fo"DebugWindowSrc\obj\\" /c ^  
+            DebugWindowSrc\DebugWindow.cpp  
+          if errorlevel 1 exit /b 1  
+  
+          rc /nologo /l 0x411 /d "NDEBUG" ^  
+            /fo "DebugWindowSrc\obj\DebugWindow.res" ^  
+            DebugWindowSrc\DebugWindow.rc  
+          if errorlevel 1 exit /b 1  
+  
+          link /nologo /subsystem:windows /machine:I386 ^  
+            /out:"DebugWindow.exe" ^  
+            DebugWindowSrc\obj\DebugWindow.obj ^  
+            DebugWindowSrc\obj\DebugWindow.res ^  
+            kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib ^  
+            advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib ^  
+            odbc32.lib odbccp32.lib  
+          if errorlevel 1 exit /b 1  
+  
+      - name: 上传构建产物  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: VirtuaNES-Release_Debugout  
+          path: |  
+            VirtuaNES.exe  
+            DebugWindow.exe
