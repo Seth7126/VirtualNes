@@ -1,0 +1,66 @@
+# 此 YAML 脚本定义了 VirtuaNES 的自动化构建流程。
+# 包含代码拉取、源码编码转换、旧版 DirectX SDK 安装、
+# 通过 CMake 生成现代构建系统，以及最终的编译和产物上传步骤。
+
+name: VirtuaNES Windows CMake Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Fix Shift-JIS (cp932) to UTF-8 BOM encoding
+      shell: powershell
+      run: |
+        Write-Host "Converting sources to UTF-8 to prevent C++ compiler syntax errors..."
+        $files = Get-ChildItem -Path . -Include *.cpp,*.h,*.c,*.rc -Recurse
+        foreach ($file in $files) {
+            try {
+                $text = [IO.File]::ReadAllText($file.FullName, [Text.Encoding]::GetEncoding(932))
+                $utf8bom = New-Object System.Text.UTF8Encoding $true
+                [IO.File]::WriteAllText($file.FullName, $text, $utf8bom)
+            } catch {
+                Write-Host "Failed to convert $($file.FullName)"
+            }
+        }
+
+    - name: Install DirectX SDK (Legacy - Jun 2010)  
+      shell: powershell  
+      run: |  
+        $url = "https://download.microsoft.com/download/A/E/7/AE743F1F-632B-4809-87A9-AA1BB3458E31/DXSDK_Jun10.exe"  
+        $installer = "$env:TEMP\DXSDK_Jun10.exe"  
+        Write-Host "Downloading DirectX SDK June 2010..."  
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing  
+        Write-Host "Installing silently..."  
+        Start-Process -FilePath $installer -ArgumentList "/U" -Wait -NoNewWindow  
+
+    - name: Configure CMake
+      shell: cmd
+      run: |
+        echo Configuring CMake project...
+        set DXSDK_DIR=C:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\
+        cmake -S . -B build -G "Visual Studio 17 2022" -A Win32
+
+    - name: Build Project
+      shell: cmd
+      run: |
+        echo Compiling Release build...
+        cmake --build build --config Release --parallel 4
+
+    - name: Collect and Upload Output Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: VirtuaNES-DebugOut
+        path: |
+          build/Release/VirtuaNES.exe
+        if-no-files-found: warn
