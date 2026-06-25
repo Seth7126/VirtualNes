@@ -42,20 +42,20 @@ jobs:
         Write-Host "Installing silently..."  
         Start-Process -FilePath $installer -ArgumentList "/U" -Wait -NoNewWindow  
         Write-Host "DirectX SDK installation complete."
-        - name: Inject _DEBUGOUT to Release config inside .dsp
-          # 运用 PowerShell 直接为传统的 VC6 文本配置文件的 "NDEBUG" Release设置注入 /D "_DEBUGOUT" 参数
-          shell: powershell
-          run: |
-            $dspFile = "VirtuaNES.dsp"
-            if (Test-Path $dspFile) {
-                $content = Get-Content $dspFile
-                $newContent = $content -replace '/D "NDEBUG"', '/D "NDEBUG" /D "_DEBUGOUT"'
-                Set-Content $dspFile $newContent
-                Write-Host "_DEBUGOUT Macro Injected to .dsp"
-            } else {
-                Write-Error "Cannot find $dspFile !"
-                exit 1
-            }
+    - name: Inject _DEBUGOUT to Release config inside .dsp
+      # 运用 PowerShell 直接为传统的 VC6 文本配置文件的 "NDEBUG" Release设置注入 /D "_DEBUGOUT" 参数
+      shell: powershell
+      run: |
+        $dspFile = "VirtuaNES.dsp"
+        if (Test-Path $dspFile) {
+            $content = Get-Content $dspFile
+            $newContent = $content -replace '/D "NDEBUG"', '/D "NDEBUG" /D "_DEBUGOUT"'
+            Set-Content $dspFile $newContent
+            Write-Host "_DEBUGOUT Macro Injected to .dsp"
+        } else {
+            Write-Error "Cannot find $dspFile !"
+            exit 1
+        }
 
     - name: Setup MSBuild & Add Devenv
       uses: microsoft/setup-msbuild@v2
