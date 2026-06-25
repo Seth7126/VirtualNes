@@ -32,28 +32,30 @@ jobs:
         }
         Write-Host "Conversion completed."
 
-    - name: Install DirectX SDK (Legacy - Jun 2010)
-      # 此组件极大且目前的新版 Windows SDK 被微软移除了原生的 ddraw.h。我们需要借巧克力包管理器下载老的SDK库。
-      shell: cmd
-      run: |
-        echo "Installing DXSDK_Jun2010 via Chocolatey. This takes around 1-3 minutes..."
-        choco install dxsdk_jun2010 -y --no-progress
-        echo "DXSDK Installation triggered."
-
-    - name: Inject _DEBUGOUT to Release config inside .dsp
-      # 运用 PowerShell 直接为传统的 VC6 文本配置文件的 "NDEBUG" Release设置注入 /D "_DEBUGOUT" 参数
-      shell: powershell
-      run: |
-        $dspFile = "VirtuaNES.dsp"
-        if (Test-Path $dspFile) {
-            $content = Get-Content $dspFile
-            $newContent = $content -replace '/D "NDEBUG"', '/D "NDEBUG" /D "_DEBUGOUT"'
-            Set-Content $dspFile $newContent
-            Write-Host "_DEBUGOUT Macro Injected to .dsp"
-        } else {
-            Write-Error "Cannot find $dspFile !"
-            exit 1
-        }
+    - name: Install DirectX SDK (Legacy - Jun 2010)  
+      shell: powershell  
+      run: |  
+        $url = "https://download.microsoft.com/download/A/E/7/AE743F1F-632B-4809-87A9-AA1BB3458E31/DXSDK_Jun10.exe"  
+        $installer = "$env:TEMP\DXSDK_Jun10.exe"  
+        Write-Host "Downloading DirectX SDK June 2010..."  
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing  
+        Write-Host "Installing silently..."  
+        Start-Process -FilePath $installer -ArgumentList "/U" -Wait -NoNewWindow  
+        Write-Host "DirectX SDK installation complete."
+        - name: Inject _DEBUGOUT to Release config inside .dsp
+          # 运用 PowerShell 直接为传统的 VC6 文本配置文件的 "NDEBUG" Release设置注入 /D "_DEBUGOUT" 参数
+          shell: powershell
+          run: |
+            $dspFile = "VirtuaNES.dsp"
+            if (Test-Path $dspFile) {
+                $content = Get-Content $dspFile
+                $newContent = $content -replace '/D "NDEBUG"', '/D "NDEBUG" /D "_DEBUGOUT"'
+                Set-Content $dspFile $newContent
+                Write-Host "_DEBUGOUT Macro Injected to .dsp"
+            } else {
+                Write-Error "Cannot find $dspFile !"
+                exit 1
+            }
 
     - name: Setup MSBuild & Add Devenv
       uses: microsoft/setup-msbuild@v2
